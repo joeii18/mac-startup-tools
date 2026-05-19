@@ -10,12 +10,12 @@ if [[ -f "$(dirname "$0")/.env" ]]; then
 fi
 
 # --- Validate credentials ---
-if [[ -z "$MAILTRAP_USER" || -z "$MAILTRAP_PASS" ]]; then
+if [[ -z "$MAILTRAP_API_TOKEN" || -z "$MAILTRAP_INBOX_ID" ]]; then
   echo "[-] Mailtrap credentials not set."
-  echo "    Either export them or create a .env file next to this script:"
+  echo "    Create a .env file next to this script with:"
   echo ""
-  echo "    MAILTRAP_USER=your-mailtrap-username"
-  echo "    MAILTRAP_PASS=your-mailtrap-password"
+  echo "    MAILTRAP_API_TOKEN=your-api-token"
+  echo "    MAILTRAP_INBOX_ID=your-inbox-id"
   exit 1
 fi
 
@@ -88,29 +88,30 @@ echo "[*] Running startup process scan..."
 REPORT=$(bash "$TMP_SCRIPT" 2>&1)
 rm -f "$TMP_SCRIPT"
 
-# --- Send email via Mailtrap SMTP ---
+# --- Send email via Mailtrap API ---
 echo ""
-echo "[*] Sending report to $RECIPIENT via Mailtrap..."
+echo "[*] Sending report to $RECIPIENT via Mailtrap API..."
+
+HOSTNAME="$(hostname)"
+TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
 
 python3 - <<EOF
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import datetime
+import urllib.request
+import urllib.error
+import json
 
-username  = """$MAILTRAP_USER"""
-password  = """$MAILTRAP_PASS"""
+token     = """$MAILTRAP_API_TOKEN"""
+inbox_id  = """$MAILTRAP_INBOX_ID"""
 recipient = """$RECIPIENT"""
-hostname  = "$(hostname)"
-timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+hostname  = """$HOSTNAME"""
+timestamp = """$TIMESTAMP"""
 report    = """$REPORT"""
 
-msg = MIMEMultipart()
-msg["From"]    = "monitor@local"
-msg["To"]      = recipient
-msg["Subject"] = f"[Monitor] Incognito detected on {hostname} at {timestamp}"
-
-body = f"""Incognito/private browser session was detected on {hostname}.
+payload = json.dumps({
+    "from": {"email": "monitor@local", "name": "Monitor Script"},
+    "to":   [{"email": recipient}],
+    "subject": f"[Monitor] Incognito detected on {hostname} at {timestamp}",
+    "text": f"""Incognito/private browser session detected on {hostname}.
 
 Startup Process Report
 ======================
@@ -119,14 +120,19 @@ Startup Process Report
 --
 Sent by monitor.sh on {timestamp}
 """
-msg.attach(MIMEText(body, "plain"))
+}).encode()
+
+req = urllib.request.Request(
+    f"https://sandbox.api.mailtrap.io/api/send/{inbox_id}",
+    data=payload,
+    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    method="POST"
+)
 
 try:
-    with smtplib.SMTP("sandbox.smtp.mailtrap.io", 2525) as server:
-        server.login(username, password)
-        server.sendmail(msg["From"], recipient, msg.as_string())
-    print("[+] Email sent — check your Mailtrap inbox")
-except Exception as e:
-    print(f"[-] Failed to send email: {e}")
+    with urllib.request.urlopen(req) as res:
+        print("[+] Email sent — check your Mailtrap inbox")
+except urllib.error.HTTPError as e:
+    print(f"[-] Failed: {e.code} {e.read().decode()}")
     exit(1)
 EOF
