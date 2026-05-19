@@ -2,15 +2,20 @@
 
 # --- Config ---
 RECIPIENT="joeyjake18@gmail.com"
-SENDER="${GMAIL_USER}"          # export GMAIL_USER=you@gmail.com
-APP_PASS="${GMAIL_APP_PASS}"    # export GMAIL_APP_PASS=xxxx-xxxx-xxxx-xxxx
 SCRIPT_URL="https://raw.githubusercontent.com/joeii18/mac-startup-tools/main/startup_processes.sh"
 
+# Load credentials from .env if present
+if [[ -f "$(dirname "$0")/.env" ]]; then
+  source "$(dirname "$0")/.env"
+fi
+
 # --- Validate credentials ---
-if [[ -z "$SENDER" || -z "$APP_PASS" ]]; then
-  echo "[-] Set GMAIL_USER and GMAIL_APP_PASS environment variables first."
-  echo "    export GMAIL_USER=you@gmail.com"
-  echo "    export GMAIL_APP_PASS=your-app-password"
+if [[ -z "$MAILTRAP_USER" || -z "$MAILTRAP_PASS" ]]; then
+  echo "[-] Mailtrap credentials not set."
+  echo "    Either export them or create a .env file next to this script:"
+  echo ""
+  echo "    MAILTRAP_USER=your-mailtrap-username"
+  echo "    MAILTRAP_PASS=your-mailtrap-password"
   exit 1
 fi
 
@@ -83,9 +88,9 @@ echo "[*] Running startup process scan..."
 REPORT=$(bash "$TMP_SCRIPT" 2>&1)
 rm -f "$TMP_SCRIPT"
 
-# --- Send email via Gmail SMTP ---
+# --- Send email via Mailtrap SMTP ---
 echo ""
-echo "[*] Sending report to $RECIPIENT..."
+echo "[*] Sending report to $RECIPIENT via Mailtrap..."
 
 python3 - <<EOF
 import smtplib
@@ -93,15 +98,15 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import datetime
 
-sender   = """$SENDER"""
-password = """$APP_PASS"""
+username  = """$MAILTRAP_USER"""
+password  = """$MAILTRAP_PASS"""
 recipient = """$RECIPIENT"""
 hostname  = "$(hostname)"
 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 report    = """$REPORT"""
 
 msg = MIMEMultipart()
-msg["From"]    = sender
+msg["From"]    = "monitor@local"
 msg["To"]      = recipient
 msg["Subject"] = f"[Monitor] Incognito detected on {hostname} at {timestamp}"
 
@@ -117,10 +122,10 @@ Sent by monitor.sh on {timestamp}
 msg.attach(MIMEText(body, "plain"))
 
 try:
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender, password)
-        server.sendmail(sender, recipient, msg.as_string())
-    print("[+] Email sent successfully to $RECIPIENT")
+    with smtplib.SMTP("sandbox.smtp.mailtrap.io", 2525) as server:
+        server.login(username, password)
+        server.sendmail(msg["From"], recipient, msg.as_string())
+    print("[+] Email sent — check your Mailtrap inbox")
 except Exception as e:
     print(f"[-] Failed to send email: {e}")
     exit(1)
