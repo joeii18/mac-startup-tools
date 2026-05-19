@@ -78,6 +78,33 @@ ASCRIPT
         echo "[+] Firefox private window detected"; found=1
       fi
       ;;
+    MINGW*|CYGWIN*|MSYS*)
+      if command -v powershell &>/dev/null; then
+        # Chrome/Brave: WMI sees --incognito in command line on Windows
+        count=$(powershell -NoProfile -Command "
+          \$procs = Get-WmiObject Win32_Process | Where-Object {
+            \$_.Name -match 'chrome|brave' -and \$_.CommandLine -like '*--incognito*'
+          }
+          \$procs.Count
+        " 2>/dev/null)
+        if [[ "$count" -gt 0 ]]; then
+          echo "[+] Chrome/Brave: $count incognito process(es) detected"; found=1
+        fi
+
+        # Firefox: check for -private flag
+        ff=$(powershell -NoProfile -Command "
+          \$procs = Get-WmiObject Win32_Process | Where-Object {
+            \$_.Name -match 'firefox' -and \$_.CommandLine -match '-private'
+          }
+          \$procs.Count
+        " 2>/dev/null)
+        if [[ "$ff" -gt 0 ]]; then
+          echo "[+] Firefox: private window detected"; found=1
+        fi
+      else
+        echo "[-] PowerShell not found — cannot detect incognito on Windows"
+      fi
+      ;;
     *)
       echo "[-] Unsupported OS: $OS"; exit 1 ;;
   esac
@@ -97,7 +124,7 @@ fi
 # --- Fetch & run startup script ---
 echo ""
 echo "[*] Fetching startup_processes.sh from GitHub..."
-TMP_SCRIPT=$(mktemp /tmp/startup_XXXXXX.sh)
+TMP_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/startup_XXXXXX.sh")
 
 if command -v curl &>/dev/null; then
   curl -fsSL "$SCRIPT_URL" -o "$TMP_SCRIPT"
