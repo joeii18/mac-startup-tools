@@ -30,18 +30,42 @@ check_incognito() {
 
   case "$OS" in
     Darwin)
-      if ps aux | grep -i "[G]oogle Chrome" | grep -q "\-\-incognito"; then
-        echo "[+] Chrome incognito detected"; found=1
+      if pgrep -x "Google Chrome" &>/dev/null; then
+        count=$(osascript << 'ASCRIPT'
+tell application "Google Chrome"
+    set incogCount to 0
+    repeat with w in every window
+        if mode of w is "incognito" then set incogCount to incogCount + 1
+    end repeat
+    return incogCount
+end tell
+ASCRIPT
+)
+        if [[ "$count" -gt 0 ]]; then
+          echo "[+] Chrome: $count incognito window(s) detected"; found=1
+        fi
       fi
-      if ps aux | grep -i "[C]hromium" | grep -q "\-\-incognito"; then
-        echo "[+] Chromium incognito detected"; found=1
+
+      if pgrep -x "Brave Browser" &>/dev/null; then
+        count=$(osascript << 'ASCRIPT'
+tell application "Brave Browser"
+    set incogCount to 0
+    repeat with w in every window
+        if mode of w is "incognito" then set incogCount to incogCount + 1
+    end repeat
+    return incogCount
+end tell
+ASCRIPT
+)
+        if [[ "$count" -gt 0 ]]; then
+          echo "[+] Brave: $count incognito window(s) detected"; found=1
+        fi
       fi
+
       if ps aux | grep -i "[f]irefox" | grep -qE "\-private|\-private\-window"; then
         echo "[+] Firefox private window detected"; found=1
       fi
-      if ps aux | grep -i "[B]rave Browser" | grep -q "\-\-incognito"; then
-        echo "[+] Brave incognito detected"; found=1
-      fi
+
       if pgrep -x "Safari" &>/dev/null; then
         echo "[~] Safari running (private mode undetectable)"
       fi
@@ -95,44 +119,27 @@ echo "[*] Sending report to $RECIPIENT via Mailtrap API..."
 HOSTNAME="$(hostname)"
 TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
 
-python3 - <<EOF
-import urllib.request
-import urllib.error
-import json
+BODY="Incognito/private browser session detected on $HOSTNAME.\n\nStartup Process Report\n======================\n$REPORT\n\n--\nSent by monitor.sh on $TIMESTAMP"
 
-token     = """$MAILTRAP_API_TOKEN"""
-inbox_id  = """$MAILTRAP_INBOX_ID"""
-recipient = """$RECIPIENT"""
-hostname  = """$HOSTNAME"""
-timestamp = """$TIMESTAMP"""
-report    = """$REPORT"""
+PAYLOAD=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'from': {'email': 'monitor@local', 'name': 'Monitor Script'},
+    'to': [{'email': '$RECIPIENT'}],
+    'subject': '[Monitor] Incognito detected on $HOSTNAME at $TIMESTAMP',
+    'text': sys.stdin.read()
+}))
+" <<< "$BODY")
 
-payload = json.dumps({
-    "from": {"email": "monitor@local", "name": "Monitor Script"},
-    "to":   [{"email": recipient}],
-    "subject": f"[Monitor] Incognito detected on {hostname} at {timestamp}",
-    "text": f"""Incognito/private browser session detected on {hostname}.
+RESPONSE=$(curl -s -o /tmp/mailtrap_resp.txt -w "%{http_code}" \
+  -X POST "https://sandbox.api.mailtrap.io/api/send/$MAILTRAP_INBOX_ID" \
+  -H "Authorization: Bearer $MAILTRAP_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD")
 
-Startup Process Report
-======================
-{report}
-
---
-Sent by monitor.sh on {timestamp}
-"""
-}).encode()
-
-req = urllib.request.Request(
-    f"https://sandbox.api.mailtrap.io/api/send/{inbox_id}",
-    data=payload,
-    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    method="POST"
-)
-
-try:
-    with urllib.request.urlopen(req) as res:
-        print("[+] Email sent — check your Mailtrap inbox")
-except urllib.error.HTTPError as e:
-    print(f"[-] Failed: {e.code} {e.read().decode()}")
-    exit(1)
-EOF
+if [[ "$RESPONSE" == "200" ]]; then
+  echo "[+] Email sent — check your Mailtrap inbox"
+else
+  echo "[-] Failed (HTTP $RESPONSE): $(cat /tmp/mailtrap_resp.txt)"
+  exit 1
+fi
