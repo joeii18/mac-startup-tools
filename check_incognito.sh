@@ -86,12 +86,12 @@ case "$OS" in
   Darwin)
     result=$(check_incognito_mac)
     found=$(echo "$result" | tail -1)
-    echo "$result" | head -n -1
+    echo "$result" | sed '$d'
     ;;
   Linux)
     result=$(check_incognito_linux)
     found=$(echo "$result" | tail -1)
-    echo "$result" | head -n -1
+    echo "$result" | sed '$d'
     ;;
   *)
     echo "Unsupported OS: $OS"
